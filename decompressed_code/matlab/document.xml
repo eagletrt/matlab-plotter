@@ -1,0 +1,587 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:pStyle w:val="code"/></w:pPr><w:r><w:t><![CDATA[classdef plotter < matlab.apps.AppBase
+
+    % Properties that correspond to app components
+    properties (Access = public)
+        PlotterUIFigure         matlab.ui.Figure
+        GridLayout              matlab.ui.container.GridLayout
+        TabGroup                matlab.ui.container.TabGroup
+        PlotTab                 matlab.ui.container.Tab
+        UIAxes                  matlab.ui.control.UIAxes
+        DatastatisticsTab       matlab.ui.container.Tab
+        GridLayout5             matlab.ui.container.GridLayout
+        GridLayout3             matlab.ui.container.GridLayout
+        DateLabel               matlab.ui.control.Label
+        StarttimeLabel          matlab.ui.control.Label
+        EndtimeLabel            matlab.ui.control.Label
+        MaximumLabel            matlab.ui.control.Label
+        MinimumLabel            matlab.ui.control.Label
+        AverageLabel            matlab.ui.control.Label
+        StandarddeviationLabel  matlab.ui.control.Label
+        TimeintervalLabel       matlab.ui.control.Label
+        NumberofsamplesLabel    matlab.ui.control.Label
+        UITable                 matlab.ui.control.Table
+        GridLayout2             matlab.ui.container.GridLayout
+        Tree                    matlab.ui.container.Tree
+    end
+
+    
+    properties (Access = private)
+        treeStruct % Description
+        CallingApp % Description
+        sensors % Description
+    end
+    
+    methods (Access = private)
+        
+        function plotOneElement(app,node,ylabelTxt)
+            [dimData,~]=size(node);
+            if dimData>0
+                app.UIAxes.Visible=true;
+                [emptyCheck,~]=size(node.Data);
+                if emptyCheck>1
+                    app.UITable.Visible=true;
+                    app.UITable.Data=table(datetime(node.Time,'ConvertFrom','posixtime',"Format","HH:mm:ss.SSS"),node.Data);
+                    app.DateLabel.Text=strcat("Date: ",string(datetime(node.Time(1),'ConvertFrom','posixtime',"Format","dd-MMM-uuuu")));
+                    app.StarttimeLabel.Text=strcat("Start time: ",string(datetime(node.Time(1),'ConvertFrom','posixtime',"Format","HH:mm:ss.SSS")));
+                    app.EndtimeLabel.Text=strcat("End time: ",string(datetime(node.Time(end),'ConvertFrom','posixtime',"Format","HH:mm:ss.SSS")));
+                    interval=[];
+                    for i=2:emptyCheck
+                        interval=[interval;node.Time(i)-node.Time(i-1)];
+                    end
+                    app.TimeintervalLabel.Text=strcat("Average time interval: ",string(round(mean(interval)*1000)),"ms");
+                    app.NumberofsamplesLabel.Text=strcat("Number of samples: ",string(emptyCheck));
+                    app.MaximumLabel.Text=strcat("Maximum: ",string(max(node.Data)));
+                    app.MinimumLabel.Text=strcat("Minimum: ",string(min(node.Data)));
+                    app.AverageLabel.Text=strcat("Average: ",string(mean(node.Data)));
+                    app.StandarddeviationLabel.Text=strcat("Standard deviation: ",string(std(node.Data)));
+                    time=datetime(node.Time,'ConvertFrom','posixtime',"Format","HH:mm:ss.SSS");
+                    plot(app.UIAxes,time,node.Data)
+                    app.UIAxes.XLim=[time(1),time(end)];
+                    maxV=1.25*max(node.Data);
+                    minV=min(node.Data);
+                    if minV==0 && maxV==0
+                        app.UIAxes.YLim=[-1 1];
+                    elseif minV>=0
+                        app.UIAxes.YLim=[0 maxV];
+                    elseif -minV>maxV
+                        app.UIAxes.YLim=[1.25*minV -1.25*minV];
+                    else
+                        app.UIAxes.YLim=[-maxV maxV];
+                    end
+                    app.UIAxes.Title.String=replace(strcat("Plot of: ",node.Name),'_','\_');
+                    app.UIAxes.YLabel.String=replace(strcat(ylabelTxt," (",node.DataInfo.Units,")"),'_','\_');
+                    app.UIAxes.XLabel.String="Time";
+                end
+                legend(app.UIAxes,ylabelTxt,'Interpreter', 'none');
+            end
+        end
+        
+        
+        function out=isnotnumber(app,str)
+            out=~((str>47)&(str<58));
+        end
+        
+        function out=removeDuplicateNames(app,sensors)
+            names=fieldnames(sensors);
+            splitted=[];
+            for variable=each(names)
+                test=split(variable,'__')';
+                splitted=[splitted;filler(app,test)];
+            end
+            layer=[];
+            index=1;
+            for row=each(splitted(:,2))
+                if ~any(strcmp(layer,row))
+                    layer=[layer;{row},splitted(index,1)];
+                elseif ~strcmp(splitted(index,1),layer(find(strcmp(layer,row)),2))
+                    splitted(index,2)=strcat(splitted(index,2),'2');
+                end
+                index=index+1;
+            end
+            layer=[];
+            index=1;
+            for row=each(splitted(:,3))
+                if ~any(strcmp(layer,row))
+                    layer=[layer;{row},strcat(splitted(index,1),splitted(index,2))];
+                elseif ~strcmp(strcat(splitted(index,1),splitted(index,2)),layer(find(strcmp(layer,row)),2))
+                    if ~any(strcmp(layer,strcat(row,'2')))
+                        layer=[layer;{strcat(row,'2')},strcat(splitted(index,1),splitted(index,2))];
+                        splitted(index,3)=strcat(splitted(index,3),'2');
+                    elseif ~strcmp(strcat(splitted(index,1),splitted(index,2)),layer(find(strcmp(layer,strcat(row,'2'))),2))
+                        splitted(index,3)=strcat(splitted(index,3),'3');
+                    end
+                    
+                end
+                index=index+1;
+            end
+            [dim,~]=size(splitted);
+            newNames=[];
+            for iterator=1:dim
+                if splitted(iterator,3)=="" || ~any(isletter(char(splitted(iterator,3))))
+                    newNames=[newNames,strcat(splitted(iterator,1),'__',splitted(iterator,2))];
+                elseif splitted(iterator,4)==""
+                    newNames=[newNames,strcat(splitted(iterator,1),'__',splitted(iterator,2),'__',splitted(iterator,3))];
+                else
+                    newNames=[newNames,strcat(splitted(iterator,1),'__',splitted(iterator,2),'__',splitted(iterator,3),'__',splitted(iterator,4))];
+                end
+            end
+            out=cell2struct(struct2cell(sensors), newNames);
+        end
+        
+        
+        function result=filler(app,element)
+            [~,dim]=size(element);
+            if dim<4
+                for fill=1:4-dim
+                    element=[element,{''}];
+                end
+            end
+            result=element;
+        end
+        
+    end
+    
+
+    % Callbacks that handle component events
+    methods (Access = private)
+
+        % Code that executes after component creation
+        function startupFcn(app)
+            file=0;
+            while file==0
+                [file,path] = uigetfile('*.mat','Select data file');
+                if file ~= 0
+                    load(fullfile(path,file),"sensors","ftype");
+                    app.sensors=sensors;
+                    if exist('ftype')==1 && ftype=="data"
+                        sensors=removeDuplicateNames(app,sensors);
+                        fid = fopen('test_log.txt', 'w');
+                        % tree generation
+                        layer{1}=[];
+                        layer{2}=[];
+                        layer{3}=[];
+                        layer{4}=[];
+                        for variable=each(fieldnames(sensors))
+                            fprintf(fid,'%s\n', variable);
+                            splitted=split(variable,'__');
+                            [numElem,~]=size(splitted);
+                            for index=1:numElem
+                                if index==1
+                                    if ~any(strcmp(layer{index},splitted(index)))       %check if the node already exists
+                                        layer{index}=[layer{index},splitted(index)];    %if not add the name to an array for future checks
+                                        if index==numElem                               %if it is the bottom level save tha value in the node data
+                                            app.treeStruct.(char(splitted(index)))=uitreenode(app.Tree);
+                                            tmp=char(splitted(index));
+                                            app.treeStruct.(char(splitted(index))).Text=tmp(isnotnumber(app,tmp));
+                                            app.treeStruct.(char(splitted(index))).NodeData=sensors.(variable);
+                                            fprintf(fid,'%s\n', '1');
+                                        else
+                                            app.treeStruct.(char(splitted(index)))=uitreenode(app.Tree);
+                                            tmp=char(splitted(index));
+                                            app.treeStruct.(char(splitted(index))).Text=tmp(isnotnumber(app,tmp));
+                                            fprintf(fid,'%s\n', '2');
+                                        end
+                                    elseif index==numElem
+                                        app.treeStruct.(char(splitted(index)))=uitreenode(app.Tree);
+                                        tmp=char(splitted(index));
+                                        app.treeStruct.(char(splitted(index))).Text=tmp(isnotnumber(app,tmp));
+                                        app.treeStruct.(char(splitted(index))).NodeData=sensors.(variable);
+                                        fprintf(fid,'%s\n', '3');
+                                    end
+                                else
+                                    if ~any(strcmp(layer{index},splitted(index)))
+                                        layer{index}=[layer{index},splitted(index)];
+                                        if index==numElem
+                                            app.treeStruct.(char(splitted(index)))=uitreenode(app.treeStruct.(char(splitted(index-1))));
+                                            tmp=char(splitted(index));
+                                            app.treeStruct.(char(splitted(index))).Text=tmp(isnotnumber(app,tmp));
+                                            app.treeStruct.(char(splitted(index))).NodeData=sensors.(variable);
+                                            fprintf(fid,'%s\n', '4');
+                                        else
+                                            app.treeStruct.(char(splitted(index)))=uitreenode(app.treeStruct.(char(splitted(index-1))));
+                                            tmp=char(splitted(index));
+                                            app.treeStruct.(char(splitted(index))).Text=tmp(isnotnumber(app,tmp));
+                                            fprintf(fid,'%s\n', '5');
+                                        end
+                                    elseif index==numElem
+                                        app.treeStruct.(char(splitted(index)))=uitreenode(app.treeStruct.(char(splitted(index-1))));
+                                        tmp=char(splitted(index));
+                                        app.treeStruct.(char(splitted(index))).Text=tmp(isnotnumber(app,tmp));
+                                        app.treeStruct.(char(splitted(index))).NodeData=sensors.(variable);
+                                        fprintf(fid,'%s\n', '6');
+                                    end
+                                end
+                            end
+                        end
+                        fclose(fid);
+                    else
+                        fid = fopen('error_log.txt', 'a');
+                        if fid == -1
+                            errordlg('Cannot open log file','Log error');
+                        else
+                            fprintf(fid, '[%s%s]: %s\n%s\n\n','PLOTTER: ', datestr(now, 0),'startup','The check variable type has not the correct value or does not exist');
+                            fclose(fid);
+                        end
+                        answer = questdlg('The selected file is not readable from this software, what do you want to do?','Error','Retry','Cancel','Retry');
+                        switch answer
+                            case 'Retry'
+                                file=0;
+                            case 'Cancel'
+                                delete(app.PlotterUIFigure);
+                        end
+                    end
+                end
+            end
+        end
+
+        % Selection changed function: Tree
+        function TreeSelectionChanged(app, event)
+            selectedNodes = app.Tree.SelectedNodes;
+            cla(app.UIAxes);
+            app.DateLabel.Text="";
+            app.StarttimeLabel.Text="";
+            app.EndtimeLabel.Text="";
+            app.TimeintervalLabel.Text="";
+            app.NumberofsamplesLabel.Text="";
+            app.MaximumLabel.Text="";
+            app.MinimumLabel.Text="";
+            app.AverageLabel.Text="";
+            app.StandarddeviationLabel.Text="";
+            app.UITable.Visible=false;
+            equality=true;
+            [dim,~]=size(selectedNodes);
+            if dim>1
+                multiSel=[];
+                for elem=each(selectedNodes)
+                    if ~isempty(elem.NodeData)
+                        multiSel=[multiSel;elem.NodeData(1)];
+                    end
+                end
+                [dim,~]=size(multiSel);
+                if dim==1 
+                    % if there's only one element which contains data
+                    ylabelTxt=split(multiSel.Name,'__');
+                    plotOneElement(app,multiSel(1),ylabelTxt(end))
+                else
+                    app.UIAxes.Visible=true;
+                    app.UIAxes.YLim=[-inf inf];
+                    legendArray=[];
+                    for i=1:dim
+                        %legend generation
+                        legendArray=[legendArray, {multiSel(i).Name}];
+                    end
+                    for iterator=1:dim-1
+                        if ~isequal(multiSel(iterator).Time,multiSel(iterator+1).Time)
+                            equality=false;
+                            break
+                        end
+                    end
+                    
+                    if equality==false
+                        minMatrix=[];
+                        for index=1:dim
+                            [dimension,~]=size(multiSel(index).Time);
+                            minMatrix=[minMatrix;index,min(multiSel(index).Time),dimension]; % get minimum timetamp and timestamp vector size for each timeserie to resample
+                        end
+                        [~,idx]=min(minMatrix(:,2)); % get position of the minimum of the timestamp which will be used as start point
+                        for col=minMatrix.' %iteration over matrix row
+                            fillerTm=multiSel(idx).Time(multiSel(idx).Time<col(2,1)); % generate a vector with timestamps (from minSample) which are between the mimimum and the first of the actual timeseries
+                            [dimFiller,~]=size(fillerTm);
+                            fillerData=zeros(dimFiller,1);
+                            name=multiSel(col(1,1)).Name;               % store actual units and name
+                            unit=multiSel(col(1,1)).Datainfo.Units;
+                            newTime=[fillerTm;multiSel(col(1,1)).Time];
+                            newData=[fillerData;multiSel(col(1,1)).Data];
+                            multiSel(col(1,1))=timeseries(newData,newTime);
+                            multiSel(col(1,1)).Name=name;
+                            multiSel(col(1,1)).Datainfo.Units=unit;             %reset units and name
+                            multiSel(col(1,1)).TimeInfo.Units='milliseconds';
+                        end
+                        [~,idx]=max(minMatrix(:,3)); % get position of the biggest of the timestamp
+                        for col=minMatrix.' %iteration over matrix row
+                            if col(1,1)~=idx
+                                multiSel(col(1,1))=resample(multiSel(col(1,1)),multiSel(idx).Time); % resample data with the biggest timestamp vector
+                                nanVec=isnan(multiSel(col(1,1)).Data);
+                                nanPos=find(nanVec);
+                                for pos=each(nanPos)
+                                    if pos>1
+                                        multiSel(col(1,1)).Data(pos)=multiSel(col(1,1)).Data(pos-1);
+                                    else
+                                        multiSel(col(1,1)).Data(pos)=0;
+                                    end
+                                    
+                                end
+                            end
+                        end
+                    end
+                    minV=min(multiSel(1));
+                    maxV=max(multiSel(1));
+                    %iteration to plot data
+                    time=datetime(multiSel(1).Time,'ConvertFrom','posixtime',"Format","HH:mm:ss.SSS");
+                    data=[];
+                    for i=1:dim
+                        data=[data,multiSel(i).Data];
+                        plot(app.UIAxes,time,multiSel(i).Data);
+                        hold(app.UIAxes,"on")
+                        if min(multiSel(i).Data)<minV
+                            minV=min(multiSel(i).Data);
+                        end
+                        if max(multiSel(i).Data)>maxV
+                            maxV=max(multiSel(i).Data);
+                        end
+                    end
+                    %editing data & statistics
+                    app.UITable.Visible=true;
+                    dataTbl=array2table(data);
+                    timeTbl=table(time);
+                    app.UITable.Data=[timeTbl,dataTbl];
+                    app.UITable.ColumnName=[{'Time'},legendArray];
+                    app.DateLabel.Text=strcat("Date: ",string(datetime(multiSel(1).Time(1),'ConvertFrom','posixtime',"Format","dd-MMM-uuuu")));
+                    app.StarttimeLabel.Text=strcat("Start time: ",string(datetime(multiSel(1).Time(1),'ConvertFrom','posixtime',"Format","HH:mm:ss.SSS")));
+                    app.EndtimeLabel.Text=strcat("End time: ",string(datetime(multiSel(1).Time(end),'ConvertFrom','posixtime',"Format","HH:mm:ss.SSS")));
+                    interval=[];
+                    [tmDim,~]=size(multiSel(1).Time);
+                    for i=2:tmDim
+                        interval=[interval;multiSel(1).Time(i)-multiSel(1).Time(i-1)];
+                    end
+                    app.TimeintervalLabel.Text=strcat("Average time interval: ",string(round(mean(interval)*1000)),"ms");
+                    app.NumberofsamplesLabel.Text=strcat("Number of samples: ",string(tmDim));
+                    %editing plot
+                    app.UIAxes.XLim=[time(1),time(end)];
+                    minV=minV-0.05*minV;
+                    maxV=maxV+0.05*maxV;
+                    app.UIAxes.YLim=[minV maxV];
+                    app.UIAxes.Title.String="Plot of: Multiple selection";
+                    app.UIAxes.YLabel.String="";
+                    app.UIAxes.XLabel.String="Time";
+                    legend(app.UIAxes,legendArray,'Location',"best");
+                end
+            else                                            %if it is not multiple selection
+                plotOneElement(app,selectedNodes.NodeData,selectedNodes.Text);
+            end
+        end
+
+        % Close request function: PlotterUIFigure
+        function PlotterUIFigureCloseRequest(app, event)
+            app.CallingApp.LaunchplotterButton.Enable = 'on';
+            delete(app) 
+        end
+
+        % Callback function
+        function PlotGPStrackButtonPushed(app, event)
+            spd=app.sensors.gps__new__vtg__ground_speed_human.Data();
+            lat=app.sensors.gps__new__gga__latitude.Data();
+            lon=app.sensors.gps__new__gga__longitude.Data();
+            nBins = 10;
+            binSpacing = (max(spd) - min(spd))/nBins;
+            binRanges = min(spd):binSpacing:max(spd)-binSpacing;
+            
+            % Add an inf to binRanges to enclose the values above the last bin.
+            binRanges(end+1) = inf;
+            
+            % |histc| determines which bin each speed value falls into.
+            [~, spdBins] = histc(spd, binRanges);
+            
+            lat = lat';
+            lon = lon';
+            spdBins = spdBins';
+            
+            % Create a geographical shape vector, which stores the line segments as
+            % features.
+            s = geoshape();
+            
+            for k = 1:nBins
+                
+                % Keep only the lat/lon values which match the current bin. Leave the
+                % rest as NaN, which are interpreted as breaks in the line segments.
+                latValid = nan(1, length(lat));
+                latValid(spdBins==k) = lat(spdBins==k);
+                
+                lonValid = nan(1, length(lon));
+                lonValid(spdBins==k) = lon(spdBins==k);
+                
+                % To make the path continuous despite being segmented into different
+                % colors, the lat/lon values that occur after transitioning from the
+                % current speed bin to another speed bin will need to be kept.
+                transitions = [diff(spdBins) 0];
+                insertionInd = find(spdBins==k & transitions~=0) + 1;
+                
+                % Preallocate space for and insert the extra lat/lon values.
+                latSeg = zeros(1, length(latValid) + length(insertionInd));
+                latSeg(insertionInd + (0:length(insertionInd)-1)) = lat(insertionInd);
+                latSeg(~latSeg) = latValid;
+                
+                lonSeg = zeros(1, length(lonValid) + length(insertionInd));
+                lonSeg(insertionInd + (0:length(insertionInd)-1)) = lon(insertionInd);
+                lonSeg(~lonSeg) = lonValid;
+                
+                % Add the lat/lon segments to the geographic shape vector.
+                s(k) = geoshape(latSeg, lonSeg);
+                
+            end
+            wm = webmap('Open Street Map');
+            colors = autumn(nBins);
+            wmline(s, 'Color', colors, 'Width', 5);
+            wmzoom(wm,18);
+        end
+    end
+
+    % Component initialization
+    methods (Access = private)
+
+        % Create UIFigure and components
+        function createComponents(app)
+
+            % Create PlotterUIFigure and hide until all components are created
+            app.PlotterUIFigure = uifigure('Visible', 'off');
+            app.PlotterUIFigure.Position = [100 100 1231 825];
+            app.PlotterUIFigure.Name = 'Plotter';
+            app.PlotterUIFigure.CloseRequestFcn = createCallbackFcn(app, @PlotterUIFigureCloseRequest, true);
+
+            % Create GridLayout
+            app.GridLayout = uigridlayout(app.PlotterUIFigure);
+            app.GridLayout.ColumnWidth = {'1x', '4x'};
+            app.GridLayout.RowHeight = {'1x'};
+
+            % Create TabGroup
+            app.TabGroup = uitabgroup(app.GridLayout);
+            app.TabGroup.Layout.Row = 1;
+            app.TabGroup.Layout.Column = 2;
+
+            % Create PlotTab
+            app.PlotTab = uitab(app.TabGroup);
+            app.PlotTab.Title = 'Plot';
+
+            % Create UIAxes
+            app.UIAxes = uiaxes(app.PlotTab);
+            title(app.UIAxes, 'Title')
+            xlabel(app.UIAxes, 'X')
+            ylabel(app.UIAxes, 'Y')
+            app.UIAxes.Visible = 'off';
+            app.UIAxes.Position = [1 3 958 777];
+
+            % Create DatastatisticsTab
+            app.DatastatisticsTab = uitab(app.TabGroup);
+            app.DatastatisticsTab.Title = 'Data & statistics';
+
+            % Create GridLayout5
+            app.GridLayout5 = uigridlayout(app.DatastatisticsTab);
+            app.GridLayout5.ColumnWidth = {'1x', '2x'};
+            app.GridLayout5.RowHeight = {'1x'};
+
+            % Create GridLayout3
+            app.GridLayout3 = uigridlayout(app.GridLayout5);
+            app.GridLayout3.ColumnWidth = {'1x'};
+            app.GridLayout3.RowHeight = {'1x', '1x', '1x', '1x', '1x', '1x', '1x', '1x', '1x', '1x', '1x', '1x', '1x', '1x', '1x'};
+            app.GridLayout3.Layout.Row = 1;
+            app.GridLayout3.Layout.Column = 1;
+
+            % Create DateLabel
+            app.DateLabel = uilabel(app.GridLayout3);
+            app.DateLabel.Layout.Row = 1;
+            app.DateLabel.Layout.Column = 1;
+            app.DateLabel.Text = '';
+
+            % Create StarttimeLabel
+            app.StarttimeLabel = uilabel(app.GridLayout3);
+            app.StarttimeLabel.Layout.Row = 2;
+            app.StarttimeLabel.Layout.Column = 1;
+            app.StarttimeLabel.Text = '';
+
+            % Create EndtimeLabel
+            app.EndtimeLabel = uilabel(app.GridLayout3);
+            app.EndtimeLabel.Layout.Row = 3;
+            app.EndtimeLabel.Layout.Column = 1;
+            app.EndtimeLabel.Text = '';
+
+            % Create MaximumLabel
+            app.MaximumLabel = uilabel(app.GridLayout3);
+            app.MaximumLabel.Layout.Row = 6;
+            app.MaximumLabel.Layout.Column = 1;
+            app.MaximumLabel.Text = '';
+
+            % Create MinimumLabel
+            app.MinimumLabel = uilabel(app.GridLayout3);
+            app.MinimumLabel.Layout.Row = 7;
+            app.MinimumLabel.Layout.Column = 1;
+            app.MinimumLabel.Text = '';
+
+            % Create AverageLabel
+            app.AverageLabel = uilabel(app.GridLayout3);
+            app.AverageLabel.Layout.Row = 8;
+            app.AverageLabel.Layout.Column = 1;
+            app.AverageLabel.Text = '';
+
+            % Create StandarddeviationLabel
+            app.StandarddeviationLabel = uilabel(app.GridLayout3);
+            app.StandarddeviationLabel.Layout.Row = 9;
+            app.StandarddeviationLabel.Layout.Column = 1;
+            app.StandarddeviationLabel.Text = '';
+
+            % Create TimeintervalLabel
+            app.TimeintervalLabel = uilabel(app.GridLayout3);
+            app.TimeintervalLabel.Layout.Row = 4;
+            app.TimeintervalLabel.Layout.Column = 1;
+            app.TimeintervalLabel.Text = '';
+
+            % Create NumberofsamplesLabel
+            app.NumberofsamplesLabel = uilabel(app.GridLayout3);
+            app.NumberofsamplesLabel.Layout.Row = 5;
+            app.NumberofsamplesLabel.Layout.Column = 1;
+            app.NumberofsamplesLabel.Text = '';
+
+            % Create UITable
+            app.UITable = uitable(app.GridLayout5);
+            app.UITable.ColumnName = {'Time'; 'Data'};
+            app.UITable.RowName = {};
+            app.UITable.Visible = 'off';
+            app.UITable.Layout.Row = 1;
+            app.UITable.Layout.Column = 2;
+
+            % Create GridLayout2
+            app.GridLayout2 = uigridlayout(app.GridLayout);
+            app.GridLayout2.ColumnWidth = {'1x'};
+            app.GridLayout2.RowHeight = {'18x', '1x'};
+            app.GridLayout2.Layout.Row = 1;
+            app.GridLayout2.Layout.Column = 1;
+
+            % Create Tree
+            app.Tree = uitree(app.GridLayout2);
+            app.Tree.Multiselect = 'on';
+            app.Tree.SelectionChangedFcn = createCallbackFcn(app, @TreeSelectionChanged, true);
+            app.Tree.Layout.Row = 1;
+            app.Tree.Layout.Column = 1;
+
+            % Show the figure after all components are created
+            app.PlotterUIFigure.Visible = 'on';
+        end
+    end
+
+    % App creation and deletion
+    methods (Access = public)
+
+        % Construct app
+        function app = plotter
+
+            % Create UIFigure and components
+            createComponents(app)
+
+            % Register the app with App Designer
+            registerApp(app, app.PlotterUIFigure)
+
+            % Execute the startup function
+            runStartupFcn(app, @startupFcn)
+
+            if nargout == 0
+                clear app
+            end
+        end
+
+        % Code that executes before app deletion
+        function delete(app)
+
+            % Delete UIFigure when app is deleted
+            delete(app.PlotterUIFigure)
+        end
+    end
+end]]></w:t></w:r></w:p></w:body></w:document>
